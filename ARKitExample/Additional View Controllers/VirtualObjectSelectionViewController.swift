@@ -19,7 +19,7 @@ class ObjectCell: UITableViewCell {
     var object: VirtualObjectDefinition? {
         didSet {
             objectTitleLabel.text = object?.displayName
-            objectImageView.image = object?.thumbImage
+//            objectImageView.image = object?.thumbImage
         }
     }
 }

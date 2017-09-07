@@ -30,7 +30,7 @@ class ViewController: UIViewController {
     var isLoadingObject: Bool = false {
         didSet {
             DispatchQueue.main.async {
-                self.settingsButton.isEnabled = !self.isLoadingObject
+//                self.settingsButton.isEnabled = !self.isLoadingObjec
                 self.addObjectButton.isEnabled = !self.isLoadingObject
                 self.restartExperienceButton.isEnabled = !self.isLoadingObject
             }
@@ -244,3 +244,194 @@ class ViewController: UIViewController {
 	}
     
 }
+
+extension ViewController: ARSCNViewDelegate {
+    // MARK: - ARSCNViewDelegate
+    
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        updateFocusSquare()
+        
+        // If light estimation is enabled, update the intensity of the model's lights and the environment map
+        if let lightEstimate = session.currentFrame?.lightEstimate {
+            sceneView.scene.enableEnvironmentMapWithIntensity(lightEstimate.ambientIntensity / 40, queue: serialQueue)
+        } else {
+            sceneView.scene.enableEnvironmentMapWithIntensity(40, queue: serialQueue)
+        }
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+        serialQueue.async {
+            self.addPlane(node: node, anchor: planeAnchor)
+            self.virtualObjectManager.checkIfObjectShouldMoveOntoPlane(anchor: planeAnchor, planeAnchorNode: node)
+        }
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+        serialQueue.async {
+            self.updatePlane(anchor: planeAnchor)
+            self.virtualObjectManager.checkIfObjectShouldMoveOntoPlane(anchor: planeAnchor, planeAnchorNode: node)
+        }
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didRemove node: SCNNode, for anchor: ARAnchor) {
+        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+        serialQueue.async {
+            self.removePlane(anchor: planeAnchor)
+        }
+    }
+    
+    func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        textManager.showTrackingQualityInfo(for: camera.trackingState, autoHide: true)
+        
+        switch camera.trackingState {
+        case .notAvailable:
+            fallthrough
+        case .limited:
+            textManager.escalateFeedback(for: camera.trackingState, inSeconds: 3.0)
+        case .normal:
+            textManager.cancelScheduledMessage(forType: .trackingStateEscalation)
+        }
+    }
+    
+    func session(_ session: ARSession, didFailWithError error: Error) {
+        guard let arError = error as? ARError else { return }
+        
+        let nsError = error as NSError
+        var sessionErrorMsg = "\(nsError.localizedDescription) \(nsError.localizedFailureReason ?? "")"
+        if let recoveryOptions = nsError.localizedRecoveryOptions {
+            for option in recoveryOptions {
+                sessionErrorMsg.append("\(option).")
+            }
+        }
+        
+        let isRecoverable = (arError.code == .worldTrackingFailed)
+        if isRecoverable {
+            sessionErrorMsg += "\nYou can try resetting the session or quit the application."
+        } else {
+            sessionErrorMsg += "\nThis is an unrecoverable error that requires to quit the application."
+        }
+        
+        displayErrorMessage(title: "We're sorry!", message: sessionErrorMsg, allowRestart: isRecoverable)
+    }
+    
+    func sessionWasInterrupted(_ session: ARSession) {
+        textManager.blurBackground()
+        textManager.showAlert(title: "Session Interrupted", message: "The session will be reset after the interruption has ended.")
+    }
+    
+    func sessionInterruptionEnded(_ session: ARSession) {
+        textManager.unblurBackground()
+        session.run(standardConfiguration, options: [.resetTracking, .removeExistingAnchors])
+        restartExperience(self)
+        textManager.showMessage("RESETTING SESSION")
+    }
+}
+
+extension ViewController: UIPopoverPresentationControllerDelegate {
+    
+    enum SegueIdentifier: String {
+        case showSettings
+        case showObjects
+    }
+    
+    // MARK: - Interface Actions
+    
+    @IBAction func chooseObject(_ button: UIButton) {
+        // Abort if we are about to load another object to avoid concurrent modifications of the scene.
+        if isLoadingObject { return }
+        
+        textManager.cancelScheduledMessage(forType: .contentPlacement)
+        
+        let definition = VirtualObjectManager.availableObjects[0]
+        let object = VirtualObject(definition: definition)
+        let position = focusSquare?.lastPosition ?? float3(0)
+        virtualObjectManager.loadVirtualObject(object, to: position, cameraTransform: session.currentFrame!.camera.transform)
+        if object.parent == nil {
+            serialQueue.async {
+                self.sceneView.scene.rootNode.addChildNode(object)
+            }
+        }
+        
+        
+        
+        //        performSegue(withIdentifier: SegueIdentifier.showObjects.rawValue, sender: button)
+    }
+    
+    /// - Tag: restartExperience
+    @IBAction func restartExperience(_ sender: Any) {
+        guard restartExperienceButtonIsEnabled, !isLoadingObject else { return }
+        
+        DispatchQueue.main.async {
+            self.restartExperienceButtonIsEnabled = false
+            
+            self.textManager.cancelAllScheduledMessages()
+            self.textManager.dismissPresentedAlert()
+            self.textManager.showMessage("STARTING A NEW SESSION")
+            
+            self.virtualObjectManager.removeAllVirtualObjects()
+            self.addObjectButton.setImage(#imageLiteral(resourceName: "add"), for: [])
+            self.addObjectButton.setImage(#imageLiteral(resourceName: "addPressed"), for: [.highlighted])
+            self.focusSquare?.isHidden = true
+            
+            self.resetTracking()
+            
+            self.restartExperienceButton.setImage(#imageLiteral(resourceName: "restart"), for: [])
+            
+            // Show the focus square after a short delay to ensure all plane anchors have been deleted.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+                self.setupFocusSquare()
+            })
+            
+            // Disable Restart button for a while in order to give the session enough time to restart.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: {
+                self.restartExperienceButtonIsEnabled = true
+            })
+        }
+    }
+    
+    // MARK: - UIPopoverPresentationControllerDelegate
+    
+    func adaptivePresentationStyle(for controller: UIPresentationController) -> UIModalPresentationStyle {
+        return .none
+    }
+    
+    
+}
+
+extension ViewController: VirtualObjectManagerDelegate {
+    
+    // MARK: - VirtualObjectManager delegate callbacks
+    
+    func virtualObjectManager(_ manager: VirtualObjectManager, willLoad object: VirtualObject) {
+        DispatchQueue.main.async {
+            // Show progress indicator
+            self.spinner = UIActivityIndicatorView()
+            self.spinner!.center = self.addObjectButton.center
+            self.spinner!.bounds.size = CGSize(width: self.addObjectButton.bounds.width - 5, height: self.addObjectButton.bounds.height - 5)
+            self.addObjectButton.setImage(#imageLiteral(resourceName: "buttonring"), for: [])
+            self.sceneView.addSubview(self.spinner!)
+            self.spinner!.startAnimating()
+            
+            self.isLoadingObject = true
+        }
+    }
+    
+    func virtualObjectManager(_ manager: VirtualObjectManager, didLoad object: VirtualObject) {
+        DispatchQueue.main.async {
+            self.isLoadingObject = false
+            
+            // Remove progress indicator
+            self.spinner?.removeFromSuperview()
+            self.addObjectButton.setImage(#imageLiteral(resourceName: "add"), for: [])
+            self.addObjectButton.setImage(#imageLiteral(resourceName: "addPressed"), for: [.highlighted])
+        }
+    }
+    
+    func virtualObjectManager(_ manager: VirtualObjectManager, couldNotPlace object: VirtualObject) {
+        textManager.showMessage("CANNOT PLACE OBJECT\nTry moving left or right.")
+    }
+    
+}
+
