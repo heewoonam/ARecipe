@@ -17,7 +17,7 @@ public class VideoCapture: NSObject {
     
     var lastTimestamp = CMTime()
     
-    public func setUp(sessionPreset: AVCaptureSession.Preset = .medium,
+    public func setUp(sessionPreset: AVCaptureSession.Preset = AVCaptureSession.Preset.iFrame1280x720,
                       completion: @escaping (Bool) -> Void) {
         queue.async {
             let success = self.setUpCamera(sessionPreset: sessionPreset)
@@ -47,7 +47,7 @@ public class VideoCapture: NSObject {
         
         let previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
         previewLayer.videoGravity = AVLayerVideoGravity.resize
-        previewLayer.connection?.videoOrientation = .landscapeRight
+        previewLayer.connection?.videoOrientation = .landscapeLeft
         self.previewLayer = previewLayer
         
         let settings: [String : Any] = [
@@ -63,7 +63,7 @@ public class VideoCapture: NSObject {
         
         // We want the buffers to be in portrait orientation otherwise they are
         // rotated by 90 degrees. Need to set this _after_ addOutput()!
-        videoOutput.connection(with: AVMediaType.video)?.videoOrientation = .landscapeRight
+        videoOutput.connection(with: AVMediaType.video)?.videoOrientation = .landscapeLeft
         
         captureSession.commitConfiguration()
         return true

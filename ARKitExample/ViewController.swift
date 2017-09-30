@@ -52,6 +52,7 @@ class ViewController: UIViewController {
     @IBOutlet weak var settingsButton: UIButton!
     @IBOutlet weak var addObjectButton: UIButton!
     @IBOutlet weak var restartExperienceButton: UIButton!
+    @IBOutlet weak var surfaceLabel: UILabel!
     
     // MARK: - Queues
     
@@ -76,6 +77,7 @@ class ViewController: UIViewController {
 		if ARWorldTrackingConfiguration.isSupported {
 			// Start the ARSession.
 			resetTracking()
+            
 		} else {
 			// This device does not support 6DOF world tracking.
 			let sessionErrorMsg = "This app requires world tracking. World tracking is only available on iOS devices with A9 processor or newer. " +
@@ -354,6 +356,9 @@ extension ViewController: UIPopoverPresentationControllerDelegate {
             }
         }
         
+        addObjectButton.isHidden = true
+        surfaceLabel.isHidden = true
+        
         
         
         //        performSegue(withIdentifier: SegueIdentifier.showObjects.rawValue, sender: button)
@@ -432,6 +437,8 @@ extension ViewController: VirtualObjectManagerDelegate {
     func virtualObjectManager(_ manager: VirtualObjectManager, couldNotPlace object: VirtualObject) {
         textManager.showMessage("CANNOT PLACE OBJECT\nTry moving left or right.")
     }
-    
+    @IBAction func nextView(_ button : UIButton) {
+        session.pause()
+    }
 }
 

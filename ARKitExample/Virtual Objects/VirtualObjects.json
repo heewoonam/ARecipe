@@ -4,4 +4,10 @@
        "displayName": "steak",
        "particleScaleInfo": { }
     },
+ {
+ "modelName": "meat",
+ "displayName": "meat",
+ "particleScaleInfo": { }
+ },
+ 
 ]

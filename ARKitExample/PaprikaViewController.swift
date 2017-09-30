@@ -1,6 +1,8 @@
 import UIKit
 import Vision
 import CoreMedia
+import AVFoundation
+import AVKit
 
 class PaprikaViewController: UIViewController {
     @IBOutlet weak var videoPreview: UIView!
@@ -12,10 +14,15 @@ class PaprikaViewController: UIViewController {
     @IBOutlet weak var leftLine: UIView!
     @IBOutlet weak var rightLine: UIView!
     @IBOutlet weak var bottomLine: UIView!
-    @IBOutlet weak var leftDot: UIImageView!
-    @IBOutlet weak var rightDot: UIImageView!
+    @IBOutlet weak var leftDotPaprika: UIImageView!
+    @IBOutlet weak var rightDotPaprika: UIImageView!
+    @IBOutlet weak var rightDotCucumber: UIImageView!
+    @IBOutlet weak var leftDotCucumber: UIImageView!
+    @IBOutlet weak var centerDotCucumber: UIImageView!
+    @IBOutlet weak var surfaceLabel: UILabel!
+    @IBOutlet weak var playerView: UIView!
     
-    let model = SqueezeNet()
+    let model = MobileNet()
     
     var videoCapture: VideoCapture!
     var request: VNCoreMLRequest!
@@ -24,15 +31,42 @@ class PaprikaViewController: UIViewController {
     var framesDone = 0
     var frameCapturingStartTime = CACurrentMediaTime()
     let semaphore = DispatchSemaphore(value: 2)
+    var predictCount = 0
+    var exists = 0
+    var playTime : CMTime!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
         predictionLabel.text = ""
-        timeLabel.text = ""
-        
+        print (playTime)
         setUpVision()
         setUpCamera()
+        
+        
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        if (playTime != nil) {
+            guard let path = Bundle.main.path(forResource: "timer", ofType:"mov") else {
+                debugPrint("timer.mov not found")
+                return
+            }
+            let player = AVPlayer(url: URL(fileURLWithPath: path))
+            NotificationCenter.default.addObserver(self, selector:#selector(self.playerDidFinishPlaying(note:)),
+                                                   name: NSNotification.Name.AVPlayerItemDidPlayToEndTime, object: player.currentItem)
+            let playerLayer = AVPlayerLayer(player: player)
+            playerLayer.borderWidth = 0
+            playerLayer.frame = self.playerView.bounds
+            self.playerView.layer.addSublayer(playerLayer)
+            self.playerView.isHidden = false
+            player.seek(to: CMTimeAdd(playTime, CMTimeMakeWithSeconds(1, 1)))
+            player.play()
+        }
+    }
+    
+    @objc func playerDidFinishPlaying(note: NSNotification) {
+        playerView.isHidden = true
     }
     
     override func didReceiveMemoryWarning() {
@@ -114,34 +148,67 @@ class PaprikaViewController: UIViewController {
     
     func show(results: [Prediction]) {
         var s: [String] = []
-        var exists = false
+        var currentPred = 0
         for (i, pred) in results.enumerated() {
             s.append(String(format: "%d: %@ (%3.2f%%)", i + 1, pred.0, pred.1 * 100))
-            if (pred.0 == "bell pepper") {
-                exists = true
+            if (i < 5) {
+                if (pred.0 == "bell pepper" && currentPred == 0) {
+                    currentPred = 1
+                }
+                else if ((pred.0 == "cucumber, cuke" || pred.0 == "zucchini, courgette") && currentPred == 0) {
+                    currentPred = 2
+                }
             }
         }
-        if (exists) {
-            leftLine.isHidden = true
-            rightLine.isHidden = true
-            topLine.isHidden = true
-            bottomLine.isHidden = true
-            leftDot.isHidden = false
-            rightDot.isHidden = false
+//        print (s.joined(separator: "\n"))
+//        print (currentPred)
+        if (currentPred == exists) {
+            predictCount += 1
+        } else {
+            predictCount = 0
+            exists = currentPred
         }
-        else {
-            leftLine.isHidden = false
-            rightLine.isHidden = false
-            topLine.isHidden = false
-            bottomLine.isHidden = false
-            leftDot.isHidden = true
-            rightDot.isHidden = true
+        if (predictCount > 1) {
+            if (exists  == 1) { //Paprika
+                leftLine.isHidden = true
+                rightLine.isHidden = true
+                topLine.isHidden = true
+                bottomLine.isHidden = true
+                leftDotCucumber.isHidden = true
+                rightDotCucumber.isHidden = true
+                centerDotCucumber.isHidden = true
+                leftDotPaprika.isHidden = false
+                rightDotPaprika.isHidden = false
+                surfaceLabel.text = "피망 끝 부분을 잘라주세요"
+            } else if (exists == 2) { //Cucumber
+                leftLine.isHidden = true
+                rightLine.isHidden = true
+                topLine.isHidden = true
+                bottomLine.isHidden = true
+                leftDotCucumber.isHidden = false
+                rightDotCucumber.isHidden = false
+                centerDotCucumber.isHidden = false
+                leftDotPaprika.isHidden = false
+                rightDotPaprika.isHidden = false
+                surfaceLabel.text = "오이를 점선에 맞춰 썰어주세요"
+            } else {
+                leftLine.isHidden = false
+                rightLine.isHidden = false
+                topLine.isHidden = false
+                bottomLine.isHidden = false
+                leftDotCucumber.isHidden = true
+                rightDotCucumber.isHidden = true
+                centerDotCucumber.isHidden = true
+                leftDotPaprika.isHidden = true
+                rightDotPaprika.isHidden = true
+                surfaceLabel.text = "아채를 사각형 안에 배치해주세요"
+            }
         }
-        predictionLabel.text = s.joined(separator: "\n")
+//        predictionLabel.text = s.joined(separator: "\n")
         
-        let elapsed = CACurrentMediaTime() - startTimes.remove(at: 0)
-        let fps = self.measureFPS()
-        timeLabel.text = String(format: "Elapsed %.5f seconds - %.2f FPS", elapsed, fps)
+//        let elapsed = CACurrentMediaTime() - startTimes.remove(at: 0)
+//        let fps = self.measureFPS()
+//        timeLabel.text = String(format: "Elapsed %.5f seconds - %.2f FPS", elapsed, fps)
     }
     
     func measureFPS() -> Double {
@@ -161,7 +228,7 @@ class PaprikaViewController: UIViewController {
         var ciImage = CIImage(cvPixelBuffer: pixelBuffer, options: nil)
         let ciContext = CIContext()
         let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent)
-        let rect: CGRect = CGRect(x: 158, y: 68, width: 163, height: 224)
+        let rect: CGRect = CGRect(x: 422, y: 136, width: 436, height: 448)
         // Create bitmap image from context using the rect
         let imageRef: CGImage = cgImage!.cropping(to: rect)!
         ciImage = CIImage(cgImage: imageRef)
